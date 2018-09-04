@@ -1,0 +1,285 @@
+
+---
+title: "Electricity Consumption Data Rigorous Exploratory Analysis"
+output: html_document
+date: "September 5, 2018"
+---
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  collapse = TRUE,
+  echo = TRUE,
+  comment = "",
+  fig.height = 10,
+  fig.width = 12,
+  fig.align = "center",
+  cache = TRUE
+)
+
+library(xaringan)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(magrittr)
+library(kableExtra)
+library(bindrcpp)
+library(naniar)
+library(tidyverse)
+library(ggridges)
+library(viridis)
+library(GGally)
+library(oz)
+library(rmapshaper)
+library(rgdal)
+library(googleVis)
+library(sugrrants)
+library(tsibble)
+library(lubridate)
+library(lvplot)
+theme_set(theme_light(base_size = 23))
+
+theme_update(# axis labels
+  axis.title = element_text(size = 10),
+  # tick labels
+  axis.text = element_text(size = 10),
+  # title 
+  title = element_text(size = 10),
+  legend.text = element_text (size = 10))
+```
+---
+  
+# How did I get the data
+  
+Rob provided! My RServer was behaving atrociously and he was kind enough to share his pool of data so that I can play around with the ideas. 
+
+# Data Structure
+
+The data constains half-hourly electricity demand values of five states - VIC, NSW, SA, TAS and QLD from 2002 to 2015. Each day is divided into 48 periods. Period 1 is midnight to 0:30am Eastern Standard Time.
+
+---
+
+Let's think of the exhaustive number of ways in which we can look at the data. Exhaustive - from the perspective of "aesthetics" and not from "geom". Hence, for a given set of aesthetics, I can construct different kinds of plots by changing the geom function. But I'm interested to look at the number of ways the aesthetics can be arranged in order to look at the data from different perspectives.
+
+The time dimension can be factored into the plot in various ways - 
+- Year
+- Day of the Year
+- Month of the Year
+- Day of the Month
+- Day of the Week
+- Half-hour of the Day
+- Weekend/ Weekday
+- Holiday/ Non-holiday
+
+Also, along the y-axis the raw data can be plotted or the distribution (for example, deciles or percentiles)
+
+The hierarchical structure of the time dimension is at times overlapping.For example, a weekday can be a holiday or a non-holiday but weekends are holidays. So if we want to construct a tree like structure (Dendogram), we will not be able to do it because of this non-overlapping nature.
+
+If we plot one dimension across x-axis, the exercise is fairly easy and you can get 8C1 combinatons.
+
+  
+#Comparison by Year
+
+```{r VIC, echo = TRUE}
+VIC <- read.csv("VIC2015/Data/demand_VIC.csv")
+VIC$Date <- as.Date(VIC$Date,origin = "1899-12-30")
+range(VIC$Date)
+
+# Week starts from Monday
+VIC <- VIC %>%
+  mutate(month = month(Date, label = FALSE, abbr = TRUE), 
+         year =  year(Date),
+         yday =yday(Date),
+         wday = wday(Date, label=FALSE, abbr=TRUE,
+                     week_start=1), 
+         bow = (wday - 1) * 48 + Period,
+         dom = day(Date),
+         bom = (dom - 1) * 48 + Period,
+         Weekend=if_else(wday %in% c(6,7),1,0))
+```
+
+```{r Mechanical_Year_line, echo=FALSE}
+
+VIC_raw <- VIC %>% mutate(index=seq(1,dim(VIC)[1],1))%>% filter(year!=2015)%>%  ggplot(aes(x=index,y=OperationalLessIndustrial,col=year)) + geom_line() +
+  scale_x_discrete(breaks=seq(2002, 2014, 5)) + theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]") + xlab("Year")
+
+VIC_raw
+
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(year),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("Year")
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(year),OperationalLessIndustrial)) + geom_jitter(alpha = 0.02) + geom_lv(outlier.colour = "red", outlier.shape = 1,colour="black") + ylab("Electricity Demand [KWh]") +xlab("Year")
+
+
+VIC_year <- VIC%>% filter(year!=2015) %>% 
+  group_by(year) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+VIC_year %>% ggplot(aes(x=year,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(2002, 2014, 1))+ theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]")
+
+```
+
+#Comparison by Months
+
+```{r Mechanical_Month_line, echo=FALSE}
+VIC_month <- VIC%>% filter(year!=2015) %>% 
+  group_by(month) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(month),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("Month")
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(month),OperationalLessIndustrial)) + geom_jitter(alpha = 0.02) + geom_lv(outlier.colour = "red", outlier.shape = 1,colour="black") + ylab("Electricity Demand [KWh]") +xlab("Month")
+
+
+VIC_month %>% ggplot(aes(x=month,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(1, 12, 1))+ theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]")
+
+```
+
+#Comparison by day of the year
+
+```{r Mechanical_yday_line, echo=FALSE}
+VIC_yday <- VIC%>% filter(year!=2015) %>% 
+  group_by(yday) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(yday),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("yday")
+
+
+VIC_yday %>% ggplot(aes(x=yday,y=Value,col=as.factor(Quantile))) + geom_line() + scale_x_continuous(breaks=seq(1, 366, 30))+ theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]")
+
+```
+
+
+#Comparison by day of the month
+
+```{r Mechanical_dom_line, echo=FALSE}
+VIC_dom <- VIC%>% filter(year!=2015) %>% 
+  group_by(dom) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(dom),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("dom")
+
+
+VIC_dom %>% ggplot(aes(x=dom,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(1, 31, 1)) + theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]")
+```
+
+#Comparison by day of the week
+
+
+```{r Mechanical_1V_wday, echo=FALSE}
+
+
+VIC_wday <- VIC%>% filter(year!=2015) %>% 
+  group_by(wday) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(wday),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("wday")
+
+
+
+VIC_wday %>% ggplot(aes(x=wday,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(1, 7, 1)) + theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]")
+```
+
+#Comparison by half hour of a day
+
+```{r Mechanical_1V_Period, echo=FALSE}
+
+
+VIC_Period <- VIC%>% filter(year!=2015) %>% 
+  group_by(Period) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(Period),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("Period")
+
+
+
+p1 <- VIC_Period %>% ggplot(aes(x=Period,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(1, 48, 1)) +theme(legend.position = "bottom") 
+
+
+p2<-VIC%>%filter(year!=2015)%>% ggplot(aes(x=as.factor(Period),y=OperationalLessIndustrial)) + geom_violin()
+
+
+p3<-VIC%>%filter(year!=2015)%>% ggplot(aes(x=as.factor(Period),y=OperationalLessIndustrial)) + geom_boxplot()
+
+data_boxplot_raw <- cbind(Period = seq(1,48,1)
+                          , upper = ggplot_build(p3)$data[[1]]$upper
+                          , ymax = ggplot_build(p3)$data[[1]]$ymax
+                          , middle = ggplot_build(p3)$data[[1]]$middle
+                          , ymin = ggplot_build(p3)$data[[1]]$ymin
+                          ,lower = ggplot_build(p3)$data[[1]]$lower)
+p4 <- as_tibble(data_boxplot_raw) %>% group_by(Period) %>%  gather("Computed_variables","Values",upper,ymax,middle,ymin,lower) %>% ggplot(aes(x=Period, y=Values,col = as.factor(Computed_variables) )) + scale_color_brewer (palette = "Dark2") + geom_line()
+
+
+#Deciles superimposed on Data
+p1 + geom_line(data = VIC%>%filter(year!=2015),aes(x=Period,y=OperationalLessIndustrial,group=Date),colour=alpha("black",0.01)) +ylab("Electricity Demand [KWh]")
+
+
+#Boxplot superimposed on Data
+
+p5 <- p4 + geom_line(data=VIC%>%filter(year!=2015),aes(x=Period,y=OperationalLessIndustrial,group=Date),colour=alpha("black",0.02)) + ylab("Load")+ theme(legend.position  = "bottom")
+
+geom_line(data=VIC%>%filter(year!=2015),aes(x=Period,y=OperationalLessIndustrial,group=Date),colour=alpha("grey",0.02))  
+
+Mod_data <- as_tibble(data_boxplot_raw) %>% ggplot(aes(Period,upper)) + geom_line(aes(y=upper)) +geom_line(aes(y=lower))+ geom_ribbon(aes(ymin=lower,ymax=upper),fill="#1b9e77",alpha = "0.5") +
+  geom_line(aes(y=ymin))+ geom_ribbon(aes(ymin=ymin,ymax=lower),fill="#7570b3",alpha = "0.5") + geom_line(aes(y=ymax))+ geom_ribbon(aes(ymin=upper,ymax=ymax),fill="#7570b3",alpha = "0.5") +  ylab("Load")+ theme(legend.position  = "bottom") + geom_line(aes(y=middle),colour="#d95f02",size=2) 
+
+Mod_data + geom_line(data=VIC%>%filter(year!=2015),aes(x=Period,y=OperationalLessIndustrial,group=Date),colour=alpha("#636363",0.02)) + xlab("Half-hour time blocks") + ylab("Electricity Demand [KWh]") + expand_limits(x=0,y=0) +theme_minimal()
+
+```
+
+#Comparison by Weekday / Weekend
+
+
+```{r Mechanical_1V_Weekend, echo=FALSE}
+
+
+VIC_Weekend <- VIC%>% filter(year!=2015) %>% 
+  group_by(Weekend) %>% 
+  do({x <- .$OperationalLessIndustrial
+  map_dfr(.x = seq(0.1,0.9,0.1),
+          .f = ~ data_frame(Quantile = .x,
+                            Value = quantile(x, probs = .x,na.rm=TRUE)))
+  })
+
+VIC%>% filter(year!=2015) %>% ggplot(aes(as.factor(Weekend),OperationalLessIndustrial)) + geom_jitter(alpha = 0.05)+ ylab("Electricity Demand [KWh]") +xlab("Weekend Proxy")
+
+
+
+VIC_Weekend %>% ggplot(aes(x=Weekend,y=Value,col=as.factor(Quantile))) +geom_line() + scale_x_continuous(breaks=seq(1, 7, 1)) + theme(legend.position = "bottom") + ylab("Electricity Demand [KWh]") 
+```
+
+
+
+Things get a bit complicated when you are plotting by one along the x-axis and facetting it by another.
+- First in order being the levels of the facets for the facetted variable should be fairly low
+- You need to force the x-axis to be the same if the levels of the x-axis variable is different for different levels of facetted variable
+- Each factor level should contain each x-axis labels
+
+Keeping these conditions in mind, let us see how many different plots are meaningful.
